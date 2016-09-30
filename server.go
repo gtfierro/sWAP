@@ -21,7 +21,7 @@ type server struct {
 	store *entityStore
 }
 
-func startServer(address string, store *entityStore) {
+func startServer(address string, store *entityStore, pidfile string) {
 	var (
 		f   *os.File
 		err error
@@ -29,7 +29,7 @@ func startServer(address string, store *entityStore) {
 	// write the PID to the file
 	pid := os.Getpid()
 
-	if f, err = os.Create(".sWAP.pid"); err != nil {
+	if f, err = os.Create(pidfile); err != nil {
 		log.Fatal(errors.Wrap(err, "Cannot write PID file"))
 	} else if _, err = f.WriteString(fmt.Sprintf("%d", pid)); err != nil {
 		log.Fatal(errors.Wrap(err, "Cannot write PID file"))

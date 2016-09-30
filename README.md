@@ -29,18 +29,20 @@ To publish on BOSSWAVE, we need:
     - transform sMAP URI /a/b/c -> /a/b/s.smap/[source name]/i.something/signal/c:
         - what is "something"? driver file name?
         - this can be indicated in the URI the sMAP driver uses to report
+        - cons: this isn't obvious to do: we don't know in advance what the timeseries URIs are, 
+          and because sMAP timeseries can be nested in each other (a uri can have sub-uris and a timeseries),
+          this transformation isn't straightforward if we want to preserve where metadata is persisted on URIs
 
 
 ## Mapping sMAP to BOSSWAVE
-
 
 Entity:
 - we can "register" entities with the sWAP proxy.
 - In the URL the sMAP driver uses to post, it contains the public key of that hash
   so that the proxy knows which key to use
 PO number:
-- will need to decide on a PO num that contains UUID and readings
-- metadata will simply be transformed into sMAP metadata
+- will need to decide on a PO num that contains UUID and readings (2.0.9.1)
+- metadata will simply be transformed from sMAP metadata into BOSSWAVE metadata persisted on URIs
 URI:
 - there will be some transformation on the URI the sMAP driver sends
 - transform sMAP URI /a/b/c -> /a/b/s.smap/[source name]/i.something/signal/c:

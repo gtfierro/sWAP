@@ -27,19 +27,21 @@ func init() {
 
 func doServer(c *cli.Context) error {
 	address := c.String("address")
+	pidfile := c.String("pidfile")
 	store := newStore(bufferFile)
 	store.waitForSignal()
-	startServer(address, store)
+	startServer(address, store, pidfile)
 	return nil
 }
 
 func doRegister(c *cli.Context) error {
+	pidfile := c.String("pidfile")
 	if c.NArg() == 0 {
 		return errors.New("Need to supply an entity file name")
 	}
 	filename := c.Args().Get(0)
 
-	f, err := os.Open(".sWAP.pid")
+	f, err := os.Open(pidfile)
 	if err != nil {
 		return errors.Wrap(err, "Could not open PID file")
 	}
@@ -54,6 +56,7 @@ func doRegister(c *cli.Context) error {
 		return errors.Wrap(err, "Could not parse PID")
 	}
 	fmt.Printf("sending signal to %d\n", pid)
+	// we need 2 signals; 1 to stop and 1 to start again
 	syscall.Kill(pid, syscall.SIGUSR1)
 	defer syscall.Kill(pid, syscall.SIGUSR1)
 
@@ -69,8 +72,8 @@ func doRegister(c *cli.Context) error {
 func main() {
 	app := cli.NewApp()
 	app.Name = "sWAP"
-	app.Usage = "Simple WAVE Acclimation Proxy"
-	app.Version = "0.1"
+	app.Usage = "sMAP to WAVE Acclimation Proxy"
+	app.Version = "0.2"
 
 	app.Commands = []cli.Command{
 		{
@@ -83,12 +86,24 @@ func main() {
 					Value: "localhost:8078",
 					Usage: "Address to listen on",
 				},
+				cli.StringFlag{
+					Name:  "pidfile,pf",
+					Value: "sWAP.pid",
+					Usage: "Path to the file where we store the PID for the server",
+				},
 			},
 		},
 		{
 			Name:   "register",
 			Usage:  "Register an entity so it can be used",
 			Action: doRegister,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "pidfile,pf",
+					Value: "sWAP.pid",
+					Usage: "Path to the file containing the PID file for the server",
+				},
+			},
 		},
 	}
 	app.Run(os.Args)
