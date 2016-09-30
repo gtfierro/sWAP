@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
+	"github.com/pkg/errors"
 	"goji.io"
 	"goji.io/pat"
 	"goji.io/pattern"
@@ -20,6 +22,22 @@ type server struct {
 }
 
 func startServer(address string, store *entityStore) {
+	var (
+		f   *os.File
+		err error
+	)
+	// write the PID to the file
+	pid := os.Getpid()
+
+	if f, err = os.Create(".sWAP.pid"); err != nil {
+		log.Fatal(errors.Wrap(err, "Cannot write PID file"))
+	} else if _, err = f.WriteString(fmt.Sprintf("%d", pid)); err != nil {
+		log.Fatal(errors.Wrap(err, "Cannot write PID file"))
+	}
+	if err = f.Close(); err != nil {
+		log.Fatal(errors.Wrap(err, "Cannot write PID file"))
+	}
+
 	s := &server{
 		mux:   goji.NewMux(),
 		store: store,

@@ -2,8 +2,12 @@ package main
 
 import (
 	"encoding/base64"
+	"fmt"
 	"io/ioutil"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 
 	"github.com/boltdb/bolt"
 	"github.com/immesys/bw2/objects"
@@ -15,8 +19,10 @@ var entityBucket = []byte("entity")
 
 // stores our entities and allows us to pull the BW2Clients using the VKs
 type entityStore struct {
+	filename string
 	// local file database that stores entities
-	db *bolt.DB
+	db     *bolt.DB
+	dbLock sync.Mutex
 	// cache of active BW2Clients for each VK
 	clients map[string]*bw2.BW2Client
 	sync.RWMutex
@@ -30,10 +36,40 @@ func newStore(filename string) *entityStore {
 	}
 
 	s := &entityStore{
-		db:      db,
-		clients: make(map[string]*bw2.BW2Client),
+		db:       db,
+		filename: filename,
+		clients:  make(map[string]*bw2.BW2Client),
 	}
 
+	s.scanAndLoadVKs()
+	s.dbLock.Lock()
+	defer s.dbLock.Unlock()
+	return s
+}
+
+func (s *entityStore) waitForSignal() {
+	var err error
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGUSR1)
+	go func() {
+		for {
+			log.Warning("Waiting for signal")
+			<-c
+			log.Warning("Got signal (lock)")
+			s.db.Close()
+			s.dbLock.Lock()
+			<-c
+			log.Warning("Got signal (unlock)")
+			if s.db, err = bolt.Open(s.filename, 0600, nil); err != nil {
+				log.Error(err)
+			}
+			s.scanAndLoadVKs()
+			s.dbLock.Unlock()
+		}
+	}()
+}
+
+func (s *entityStore) scanAndLoadVKs() {
 	s.Lock()
 	defer s.Unlock()
 	s.db.Update(func(tx *bolt.Tx) error {
@@ -60,13 +96,13 @@ func newStore(filename string) *entityStore {
 		})
 		return nil
 	})
-	return s
 }
 
 // Add entity from the given file name.
 // The file contents get stored in the entity bucket with the public key (vk) as the key.
 // Returns the vk of the key on success
 func (s *entityStore) addEntityFile(filename string) (string, error) {
+	//TODO: send a user-defined signal to any running server process to load in the new VK
 	// read the file to get its contents; this way, we can just store the
 	// bytes instead of having to keep the file intact
 	contents, err := ioutil.ReadFile(filename)
@@ -85,12 +121,15 @@ func (s *entityStore) addEntityFile(filename string) (string, error) {
 	vk := entity.GetVK()
 	vk_string := base64.URLEncoding.EncodeToString(vk)
 
+	fmt.Println("update")
+	s.dbLock.Lock()
+	defer s.dbLock.Unlock()
 	err = s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(entityBucket)
 		return b.Put(vk, contents)
 	})
 
-	//TODO: send a user-defined signal to any running server process to load in the new VK
+	fmt.Println("open file")
 	return vk_string, err
 }
 

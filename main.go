@@ -1,10 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"github.com/codegangsta/cli"
 	"github.com/op/go-logging"
 	"github.com/pkg/errors"
 	"os"
+	"strconv"
+	"syscall"
 )
 
 // logger
@@ -25,6 +28,7 @@ func init() {
 func doServer(c *cli.Context) error {
 	address := c.String("address")
 	store := newStore(bufferFile)
+	store.waitForSignal()
 	startServer(address, store)
 	return nil
 }
@@ -34,6 +38,25 @@ func doRegister(c *cli.Context) error {
 		return errors.New("Need to supply an entity file name")
 	}
 	filename := c.Args().Get(0)
+
+	f, err := os.Open(".sWAP.pid")
+	if err != nil {
+		return errors.Wrap(err, "Could not open PID file")
+	}
+	var pidbytes = make([]byte, 16)
+	n, err := f.Read(pidbytes)
+	if err != nil {
+		return errors.Wrap(err, "Could not read PID file")
+	}
+	fmt.Println(string(pidbytes))
+	pid, err := strconv.Atoi(string(pidbytes[:n]))
+	if err != nil {
+		return errors.Wrap(err, "Could not parse PID")
+	}
+	fmt.Printf("sending signal to %d\n", pid)
+	syscall.Kill(pid, syscall.SIGUSR1)
+	defer syscall.Kill(pid, syscall.SIGUSR1)
+
 	store := newStore(bufferFile)
 	if vk, err := store.addEntityFile(filename); err == nil {
 		log.Noticef("Stored key with VK= %s", vk)
