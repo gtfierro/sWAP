@@ -1,4 +1,4 @@
-# simple WAVE Monitoring and Access Protocol
+# sMAP to WAVE Monitoring and Access Protocol
 
 sMAP driver - BOSSWAVE bridge
 
@@ -26,7 +26,9 @@ To publish on BOSSWAVE, we need:
     - prefix each of the sMAP paths with some base URI:
         - benefit: simple, extensible
         - cons: don't get signal/slot URI structure
-    - transform sMAP URI /a/b/c -> /a/b/s.smap/[source name]/i.something/signal/c
+    - transform sMAP URI /a/b/c -> /a/b/s.smap/[source name]/i.something/signal/c:
+        - what is "something"? driver file name?
+        - this can be indicated in the URI the sMAP driver uses to report
 
 
 ## Mapping sMAP to BOSSWAVE
@@ -39,4 +41,20 @@ Entity:
 PO number:
 - will need to decide on a PO num that contains UUID and readings
 - metadata will simply be transformed into sMAP metadata
+URI:
+- there will be some transformation on the URI the sMAP driver sends
+- transform sMAP URI /a/b/c -> /a/b/s.smap/[source name]/i.something/signal/c:
+    - what is the interface? "something"? driver file name?
+    - this can be indicated in the URI the sMAP driver uses to report
+Reliability:
+- the proxy checks its connectivity to BOSSWAVE and buffers messages if it knows they cannot be sent
 
+
+
+## sWAP Structure
+
+- command line tool
+- management:
+    - register/unregister entities
+- server:
+    - uses some local storage to contain the registered entities (bolt?)
