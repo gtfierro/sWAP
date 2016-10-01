@@ -102,7 +102,6 @@ func (s *entityStore) scanAndLoadVKs() {
 // The file contents get stored in the entity bucket with the public key (vk) as the key.
 // Returns the vk of the key on success
 func (s *entityStore) addEntityFile(filename string) (string, error) {
-	//TODO: send a user-defined signal to any running server process to load in the new VK
 	// read the file to get its contents; this way, we can just store the
 	// bytes instead of having to keep the file intact
 	contents, err := ioutil.ReadFile(filename)
