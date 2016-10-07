@@ -28,7 +28,8 @@ func init() {
 func doServer(c *cli.Context) error {
 	address := c.String("address")
 	pidfile := c.String("pidfile")
-	store := newStore(bufferFile)
+	agent := c.String("agent")
+	store := newStore(bufferFile, agent)
 	store.waitForSignal()
 	startServer(address, store, pidfile)
 	return nil
@@ -60,7 +61,7 @@ func doRegister(c *cli.Context) error {
 	syscall.Kill(pid, syscall.SIGUSR1)
 	defer syscall.Kill(pid, syscall.SIGUSR1)
 
-	store := newStore(bufferFile)
+	store := newStore(bufferFile, "")
 	if vk, err := store.addEntityFile(filename); err == nil {
 		log.Noticef("Stored key with VK= %s", vk)
 	} else {
@@ -73,7 +74,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "sWAP"
 	app.Usage = "sMAP to WAVE Acclimation Proxy"
-	app.Version = "0.2"
+	app.Version = "0.3"
 
 	app.Commands = []cli.Command{
 		{
@@ -90,6 +91,12 @@ func main() {
 					Name:  "pidfile,pf",
 					Value: "sWAP.pid",
 					Usage: "Path to the file where we store the PID for the server",
+				},
+				cli.StringFlag{
+					Name:   "agent",
+					Value:  "127.0.0.1:28589",
+					EnvVar: "BW2_AGENT",
+					Usage:  "Address of BW2 agent",
 				},
 			},
 		},

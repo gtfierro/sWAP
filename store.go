@@ -23,13 +23,15 @@ type entityStore struct {
 	// local file database that stores entities
 	db     *bolt.DB
 	dbLock sync.Mutex
+	// router agent address
+	agent string
 	// cache of active BW2Clients for each VK
 	clients map[string]*bw2.BW2Client
 	sync.RWMutex
 }
 
 // create a new entity store at the given filename
-func newStore(filename string) *entityStore {
+func newStore(filename, agent string) *entityStore {
 	db, err := bolt.Open(filename, 0600, nil)
 	if err != nil {
 		log.Fatal(errors.Wrap(err, "Could not open database file"))
@@ -38,6 +40,7 @@ func newStore(filename string) *entityStore {
 	s := &entityStore{
 		db:       db,
 		filename: filename,
+		agent:    agent,
 		clients:  make(map[string]*bw2.BW2Client),
 	}
 
@@ -79,7 +82,7 @@ func (s *entityStore) scanAndLoadVKs() {
 		}
 		// loop through the bucket and create clients for each of the known keys
 		b.ForEach(func(vk, contents []byte) error {
-			client := bw2.ConnectOrExit("")
+			client := bw2.ConnectOrExit(s.agent)
 			vk2, err := client.SetEntity(contents)
 			if err != nil {
 				log.Error(errors.Wrap(err, "Could not set entity"))
