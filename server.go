@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/pkg/errors"
 	"goji.io"
@@ -17,8 +19,11 @@ import (
 )
 
 type server struct {
-	mux   *goji.Mux
-	store *entityStore
+	mux          *goji.Mux
+	store        *entityStore
+	num_received uint64
+	num_metadata uint64
+	num_readings uint64
 }
 
 func startServer(address string, store *entityStore, pidfile string) {
@@ -39,17 +44,32 @@ func startServer(address string, store *entityStore, pidfile string) {
 	}
 
 	s := &server{
-		mux:   goji.NewMux(),
-		store: store,
+		mux:          goji.NewMux(),
+		store:        store,
+		num_received: 0,
+		num_metadata: 0,
+		num_readings: 0,
 	}
+
+	go func() {
+		tick := time.NewTicker(10 * time.Second)
+		for _ = range tick.C {
+			received := atomic.SwapUint64(&s.num_received, 0)
+			metadata := atomic.SwapUint64(&s.num_metadata, 0)
+			readings := atomic.SwapUint64(&s.num_readings, 0)
+			fmt.Printf("%s: msgs/metadata/timeseries = %d/%d/%d\n", time.Now(), received, metadata, readings)
+		}
+	}()
+
 	s.mux.HandleFuncC(pat.Post("/add/:vk/uri/*"), s.add)
 	log.Noticef("Serving on %s...", address)
 	log.Fatal(http.ListenAndServe(address, s.mux))
+
 }
 
 func (s *server) add(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-
+	atomic.AddUint64(&s.num_received, 1)
 	// extract the VK and path from the URI
 	vk := pat.Param(ctx, "vk")
 	baseuri := strings.TrimPrefix(pattern.Path(ctx), "/")
@@ -72,6 +92,7 @@ func (s *server) add(ctx context.Context, w http.ResponseWriter, r *http.Request
 
 	// persist the metadata we extract
 	for _, msg := range messages {
+		atomic.AddUint64(&s.num_metadata, uint64(len(msg.Metadata)))
 		for k, v := range msg.Metadata {
 			vs, ok := v.(string)
 			if !ok {
@@ -87,6 +108,7 @@ func (s *server) add(ctx context.Context, w http.ResponseWriter, r *http.Request
 
 	// find timeseries data, form POs, and publish
 	for _, msg := range messages {
+		atomic.AddUint64(&s.num_readings, uint64(len(msg.Readings)))
 		if len(msg.Readings) > 0 {
 			uri := buildURI(baseuri, msg.Path)
 			po := TimeseriesReading{UUID: string(msg.UUID)}
