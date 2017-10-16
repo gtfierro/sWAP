@@ -1,19 +1,23 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"github.com/codegangsta/cli"
-	"github.com/op/go-logging"
-	"github.com/pkg/errors"
+	"net/http"
 	"os"
-	"strconv"
-	"syscall"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	hod "github.com/gtfierro/hod/clients/go"
+	"github.com/op/go-logging"
+	"goji.io"
+	"goji.io/pat"
+	bw2 "gopkg.in/immesys/bw2bind.v5"
 )
 
 // logger
 var log *logging.Logger
-
-const bufferFile = ".sWAP.db"
 
 // set up logging facilities
 func init() {
@@ -25,93 +29,80 @@ func init() {
 	logging.SetFormatter(logging.MustStringFormatter(format))
 }
 
-func doServer(c *cli.Context) error {
-	address := c.String("address")
-	pidfile := c.String("pidfile")
-	agent := c.String("agent")
-	store := newStore(bufferFile, agent)
-	store.waitForSignal()
-	startServer(address, store, pidfile)
-	return nil
+type server struct {
+	mux          *goji.Mux
+	hod          *hod.HodClientBW2
+	bw2          *bw2.BW2Client
+	num_received uint64
+	num_metadata uint64
+	num_readings uint64
 }
 
-func doRegister(c *cli.Context) error {
-	pidfile := c.String("pidfile")
-	if c.NArg() == 0 {
-		return errors.New("Need to supply an entity file name")
-	}
-	filename := c.Args().Get(0)
+func startServer(address string, hoduri string) {
 
-	f, err := os.Open(pidfile)
-	if err != nil {
-		return errors.Wrap(err, "Could not open PID file")
+	s := &server{
+		mux:          goji.NewMux(),
+		num_received: 0,
+		num_metadata: 0,
+		num_readings: 0,
 	}
-	var pidbytes = make([]byte, 16)
-	n, err := f.Read(pidbytes)
-	if err != nil {
-		return errors.Wrap(err, "Could not read PID file")
-	}
-	fmt.Println(string(pidbytes))
-	pid, err := strconv.Atoi(string(pidbytes[:n]))
-	if err != nil {
-		return errors.Wrap(err, "Could not parse PID")
-	}
-	fmt.Printf("sending signal to %d\n", pid)
-	// we need 2 signals; 1 to stop and 1 to start again
-	syscall.Kill(pid, syscall.SIGUSR1)
-	defer syscall.Kill(pid, syscall.SIGUSR1)
 
-	store := newStore(bufferFile, "")
-	if vk, err := store.addEntityFile(filename); err == nil {
-		log.Noticef("Stored key with VK= %s", vk)
-	} else {
-		return err
+	go func() {
+		tick := time.NewTicker(10 * time.Second)
+		for _ = range tick.C {
+			received := atomic.SwapUint64(&s.num_received, 0)
+			metadata := atomic.SwapUint64(&s.num_metadata, 0)
+			readings := atomic.SwapUint64(&s.num_readings, 0)
+			fmt.Printf("%s: msgs/metadata/timeseries = %d/%d/%d\n", time.Now(), received, metadata, readings)
+		}
+	}()
+
+	// define Hod client
+	s.bw2 = bw2.ConnectOrExit("")
+	s.bw2.OverrideAutoChainTo(true)
+	s.bw2.SetEntityFromEnvironOrExit()
+	bc, err := hod.NewBW2Client(s.bw2, hoduri)
+	if err != nil {
+		panic(err)
 	}
-	return nil
+	s.hod = bc
+
+	s.mux.HandleFunc(pat.Post("/add/*"), s.add)
+	log.Noticef("Serving on %s...", address)
+	log.Fatal(http.ListenAndServe(address, s.mux))
+}
+
+func (s *server) add(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	atomic.AddUint64(&s.num_received, 1)
+	// extract the VK and path from the URI
+	baseuri := strings.TrimPrefix(r.URL.String(), pat.Post("/add/").PathPrefix())
+	// get the client for the corresponding vk
+
+	var msgs map[string]SmapMessage
+	dec := json.NewDecoder(r.Body)
+	dec.UseNumber()
+	if err := dec.Decode(&msgs); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	for _, msg := range msgs {
+		//log.Debugf("%+v", msg)
+		atomic.AddUint64(&s.num_metadata, uint64(len(msg.Metadata)))
+		atomic.AddUint64(&s.num_readings, uint64(len(msg.Readings)))
+
+		if err := s.forward(msg.UUID, msg.Readings, baseuri); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		} else {
+			log.Debugf("baseuri %s", baseuri)
+		}
+	}
+
+	w.WriteHeader(200)
 }
 
 func main() {
-	app := cli.NewApp()
-	app.Name = "sWAP"
-	app.Usage = "sMAP to WAVE Acclimation Proxy"
-	app.Version = "0.3"
-
-	app.Commands = []cli.Command{
-		{
-			Name:   "server",
-			Usage:  "Start the proxy server",
-			Action: doServer,
-			Flags: []cli.Flag{
-				cli.StringFlag{
-					Name:  "address,a",
-					Value: "localhost:8078",
-					Usage: "Address to listen on",
-				},
-				cli.StringFlag{
-					Name:  "pidfile,pf",
-					Value: "sWAP.pid",
-					Usage: "Path to the file where we store the PID for the server",
-				},
-				cli.StringFlag{
-					Name:   "agent",
-					Value:  "127.0.0.1:28589",
-					EnvVar: "BW2_AGENT",
-					Usage:  "Address of BW2 agent",
-				},
-			},
-		},
-		{
-			Name:   "register",
-			Usage:  "Register an entity so it can be used",
-			Action: doRegister,
-			Flags: []cli.Flag{
-				cli.StringFlag{
-					Name:  "pidfile,pf",
-					Value: "sWAP.pid",
-					Usage: "Path to the file containing the PID file for the server",
-				},
-			},
-		},
-	}
-	app.Run(os.Args)
+	startServer("127.0.0.1:8001", "scratch.ns/hod")
 }
